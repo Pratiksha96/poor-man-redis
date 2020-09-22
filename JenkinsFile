@@ -1,0 +1,44 @@
+pipeline {
+    agent any
+    stages {
+        stage("Checkout code") {
+            steps {
+                checkout scm
+            }
+        }
+        stage("Build image") {
+            steps {
+                script {
+                    nodeapp = docker.build("DOCKER-HUB-USERNAME/nodeapp:${env.BUILD_ID}")
+                }
+            }
+        }
+        stage("Push image") {
+            steps {
+                script {
+                    docker.withRegistry('https://registry.hub.docker.com', 'dockerhub') {
+                            nodeapp.push("latest")
+                            nodeapp.push("${env.BUILD_ID}")
+                    }
+                }
+            }
+        }        
+        stage('Deploy to GKE') {
+            steps{
+                #deploy redis to local cluster
+                sh "kubectl apply -f redis.yaml"
+                sh "pod_name=$(kubectl get po -l app=node-redis | grep app-with-redis | awk '{print $1}')
+                #check whether redis is up
+                sh """  while true; do
+                pong=$(kubectl exec -it $pod_name -c redis redis-cli ping)
+                if [[ "$pong" == *"PONG"* ]]; then
+                echo ok;
+                break
+                fi
+                done """
+                #deploy app to local cluster
+                sh "kubectl apply -f app.yaml"                
+            }
+        }
+    }    
+}
